@@ -1,0 +1,27 @@
+name: 'Shopify Theme JSON Syncs'
+description: 'Sync Shopify Theme JSONs'
+author: 'devil1991'
+inputs:
+  store:
+    required: true
+    description: 'Store'
+
+  theme:
+    required: true
+    description: 'Target Theme ID (where synced files will be pushed to)'
+
+  source-theme:
+    required: false
+    description: 'Source Theme ID to sync JSON files from (if not provided, syncs from live theme)'
+
+  working-directory:
+    required: false
+    description: 'Working Directory'
+
+  skip-settings-data:
+    required: false
+    default: 'false'
+    description: 'Skip pulling, merging, and pushing config/settings_data.json'
+runs:
+  main: 'dist/index.js'
+  using: 'node20'
