@@ -4,7 +4,7 @@ import {existsSync} from 'fs'
 import deepmerge from 'deepmerge'
 import {rmRF} from '@actions/io'
 import {copySync} from 'fs-extra'
-import {debug, error as errorLog} from '@actions/core'
+import {debug, info} from '@actions/core'
 import {
   ShopifySettingsOrTemplateJSON,
   ISyncLocalJSONWithRemoteJSONForStore
@@ -19,7 +19,7 @@ export const EXEC_OPTIONS = {
       debug(data.toString())
     },
     stderr: (data: Buffer) => {
-      errorLog(data.toString())
+      info(data.toString())
     }
   }
 }

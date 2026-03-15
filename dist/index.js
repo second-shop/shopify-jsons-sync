@@ -130,7 +130,7 @@ exports.EXEC_OPTIONS = {
             (0, core_1.debug)(data.toString());
         },
         stderr: (data) => {
-            (0, core_1.error)(data.toString());
+            (0, core_1.info)(data.toString());
         }
     }
 };
