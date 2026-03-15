@@ -94,10 +94,14 @@ export const cleanRemoteFiles = async (): Promise<void> => {
   }
 }
 
+// 10MB buffer - Shopify CLI --verbose output can exceed Node's default 1MB
+const EXEC_MAX_BUFFER = 10 * 1024 * 1024
+
 export async function execShellCommand(cmd: string): Promise<string | Buffer> {
   return new Promise((resolve, reject) => {
     nativeExec(
       cmd,
+      {maxBuffer: EXEC_MAX_BUFFER},
       (error: ExecException | null, stdout: string, stderr: string) => {
         if (error) {
           return reject(error)
