@@ -83,9 +83,10 @@ async function run() {
         const localeFilesToPush = await (0, utils_1.syncLocaleAndSettingsJSON)({
             includeSettingsData: !skipSettingsData
         });
-        const newTemplatesToPush = await (0, utils_1.getNewTemplatesToRemote)();
+        const templatesFromRemoteToPush = await (0, utils_1.syncTemplateJSON)();
+        const localOnlyTemplatesToPush = await (0, utils_1.getNewTemplatesToRemote)();
         // STEP 3: Push the processed JSON files TO the target theme
-        await (0, utils_1.sendFilesWithPathToShopify)([...localeFilesToPush, ...newTemplatesToPush], {
+        await (0, utils_1.sendFilesWithPathToShopify)([...localeFilesToPush, ...templatesFromRemoteToPush, ...localOnlyTemplatesToPush], {
             targetThemeId,
             store
         });
@@ -112,7 +113,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getNewTemplatesToRemote = exports.syncLocaleAndSettingsJSON = exports.removeDisabledKeys = exports.sendFilesWithPathToShopify = exports.validateShopifyCliAccess = exports.cleanRemoteFiles = exports.readJsonFile = exports.fetchFiles = exports.EXEC_OPTIONS = void 0;
+exports.getNewTemplatesToRemote = exports.syncTemplateJSON = exports.syncLocaleAndSettingsJSON = exports.mergeRemoteJsonPathsIntoLocal = exports.removeDisabledKeys = exports.sendFilesWithPathToShopify = exports.validateShopifyCliAccess = exports.cleanRemoteFiles = exports.readJsonFile = exports.fetchFiles = exports.EXEC_OPTIONS = void 0;
 exports.execShellCommand = execShellCommand;
 const glob_1 = __nccwpck_require__(8090);
 const promises_1 = __nccwpck_require__(3292);
@@ -271,46 +272,40 @@ const removeDisabledKeys = (obj) => {
     return newObj;
 };
 exports.removeDisabledKeys = removeDisabledKeys;
-const syncLocaleAndSettingsJSON = async ({ includeSettingsData = true } = {}) => {
-    const remotePatterns = ['./remote/locales/*.json'];
-    if (includeSettingsData) {
-        remotePatterns.push('./remote/config/*_data.json');
+const mergeOptions = {
+    arrayMerge: (_, sourceArray) => sourceArray,
+    customMerge: (key) => {
+        if (key === 'blocks') {
+            return (_, newBlocks) => (0, exports.removeDisabledKeys)(newBlocks);
+        }
+        return undefined;
     }
+};
+/**
+ * Deep-merge pulled files under `remote/` into matching repo paths.
+ * Remote wins on conflicting keys; keys that exist only in the repo are kept.
+ */
+const mergeRemoteJsonPathsIntoLocal = async (remotePatterns) => {
     const remoteFiles = await (0, exports.fetchFiles)(remotePatterns.join('\n'));
-    for (const remoteFile of remoteFiles) {
-        (0, core_1.debug)(`Remote File: ${remoteFile}`);
+    for (const path of remoteFiles) {
+        (0, core_1.debug)(`Remote File: ${path}`);
     }
     const localFilesToPush = [];
     for (const file of remoteFiles) {
         try {
-            // Read JSON for Remote File
-            const remoteFile = await (0, exports.readJsonFile)(file);
+            const remoteJson = await (0, exports.readJsonFile)(file);
             (0, core_1.debug)(`Remote File: ${file}`);
-            // Get Local Version of File Path
             const localFileRef = await fetchLocalFileForRemoteFile(file);
             (0, core_1.debug)(`Local File Ref: ${localFileRef}`);
-            // Read JSON for Local File
-            const localFile = await (0, exports.readJsonFile)(localFileRef);
-            // Merge Local and Remote Files with Remote as Primary
-            const mergedFile = (0, deepmerge_1.default)(localFile, remoteFile, {
-                arrayMerge: (_, sourceArray) => sourceArray,
-                customMerge: key => {
-                    if (key === 'blocks') {
-                        return (_, newBlocks) => {
-                            return (0, exports.removeDisabledKeys)(newBlocks);
-                        };
-                    }
-                    return undefined;
-                }
-            });
-            // Write Merged File to Local File
+            const localJson = await (0, exports.readJsonFile)(localFileRef);
+            const mergedFile = (0, deepmerge_1.default)(localJson, remoteJson, mergeOptions);
             await (0, promises_1.mkdir)((0, path_1.dirname)(localFileRef), { recursive: true });
             await (0, promises_1.writeFile)(localFileRef, JSON.stringify(mergedFile, null, 2));
             localFilesToPush.push(localFileRef);
         }
         catch (error) {
             if (error instanceof Error) {
-                (0, core_1.debug)('Error in syncLocaleAndSettingsJSON');
+                (0, core_1.debug)('Error in mergeRemoteJsonPathsIntoLocal');
                 (0, core_1.debug)(error.message);
             }
             continue;
@@ -318,37 +313,49 @@ const syncLocaleAndSettingsJSON = async ({ includeSettingsData = true } = {}) =>
     }
     return localFilesToPush;
 };
+exports.mergeRemoteJsonPathsIntoLocal = mergeRemoteJsonPathsIntoLocal;
+const syncLocaleAndSettingsJSON = async ({ includeSettingsData = true } = {}) => {
+    const remotePatterns = ['./remote/locales/*.json'];
+    if (includeSettingsData) {
+        remotePatterns.push('./remote/config/*_data.json');
+    }
+    return (0, exports.mergeRemoteJsonPathsIntoLocal)(remotePatterns);
+};
 exports.syncLocaleAndSettingsJSON = syncLocaleAndSettingsJSON;
-const getNewTemplatesToRemote = async () => {
-    const remoteTemplateFiles = (await (0, exports.fetchFiles)('./remote/templates/**/*.json')) || [];
+/**
+ * Overwrite templates/ with copies of pulled remote/templates (no merge).
+ * Local-only templates (not present under remote after pull) are unchanged here;
+ * they are pushed separately via getNewTemplatesToRemote.
+ */
+const syncTemplateJSON = async () => {
+    const remoteFiles = await (0, exports.fetchFiles)('./remote/templates/**/*.json');
     const localFilesToPush = [];
-    for (const file of remoteTemplateFiles) {
+    for (const file of remoteFiles) {
         try {
-            const remoteFile = await (0, exports.readJsonFile)(file);
+            (0, core_1.debug)(`Remote template: ${file}`);
             const localFileRef = await fetchLocalFileForRemoteFile(file);
-            const localFile = await (0, exports.readJsonFile)(localFileRef);
-            const mergedFile = (0, deepmerge_1.default)(localFile, remoteFile, {
-                arrayMerge: (_, sourceArray) => sourceArray
-            });
             await (0, promises_1.mkdir)((0, path_1.dirname)(localFileRef), { recursive: true });
-            await (0, promises_1.writeFile)(localFileRef, JSON.stringify(mergedFile, null, 2));
+            await (0, promises_1.copyFile)(file, localFileRef);
             localFilesToPush.push(localFileRef);
         }
         catch (error) {
             if (error instanceof Error) {
-                (0, core_1.debug)('Error in getNewTemplatesToRemote');
+                (0, core_1.debug)('Error in syncTemplateJSON');
                 (0, core_1.debug)(error.message);
             }
-        }
-    }
-    const localTemplateFiles = await (0, exports.fetchFiles)('./templates/**/*.json');
-    for (const file of localTemplateFiles) {
-        const localFileRef = file.replace(`${process.cwd()}/`, '');
-        if (!localFilesToPush.includes(localFileRef)) {
-            localFilesToPush.push(localFileRef);
+            continue;
         }
     }
     return localFilesToPush;
+};
+exports.syncTemplateJSON = syncTemplateJSON;
+const getNewTemplatesToRemote = async () => {
+    const remoteTemplateFilesNames = ((await (0, exports.fetchFiles)('./remote/templates/**/*.json')) || []).map(file => file.replace(`${process.cwd()}/remote/`, 'remote/').replace('remote/', ''));
+    const localTemplateFiles = await (0, exports.fetchFiles)('./templates/**/*.json');
+    const localeFilesToMove = localTemplateFiles
+        .map(file => file.replace(`${process.cwd()}/`, ''))
+        .filter(file => !remoteTemplateFilesNames.includes(file));
+    return localeFilesToMove;
 };
 exports.getNewTemplatesToRemote = getNewTemplatesToRemote;
 

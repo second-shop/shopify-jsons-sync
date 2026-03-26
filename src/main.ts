@@ -5,6 +5,7 @@ import {
   getNewTemplatesToRemote,
   sendFilesWithPathToShopify,
   syncLocaleAndSettingsJSON,
+  syncTemplateJSON,
   validateShopifyCliAccess
 } from './utils'
 import {exec} from '@actions/exec'
@@ -65,11 +66,12 @@ async function run(): Promise<void> {
     const localeFilesToPush = await syncLocaleAndSettingsJSON({
       includeSettingsData: !skipSettingsData
     })
-    const newTemplatesToPush = await getNewTemplatesToRemote()
+    const templatesFromRemoteToPush = await syncTemplateJSON()
+    const localOnlyTemplatesToPush = await getNewTemplatesToRemote()
 
     // STEP 3: Push the processed JSON files TO the target theme
     await sendFilesWithPathToShopify(
-      [...localeFilesToPush, ...newTemplatesToPush],
+      [...localeFilesToPush, ...templatesFromRemoteToPush, ...localOnlyTemplatesToPush],
       {
         targetThemeId,
         store

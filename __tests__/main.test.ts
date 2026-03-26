@@ -6,6 +6,7 @@ import {
   getNewTemplatesToRemote,
   removeDisabledKeys,
   syncLocaleAndSettingsJSON,
+  syncTemplateJSON,
   validateShopifyCliAccess
 } from '../src/utils'
 
@@ -136,6 +137,50 @@ describe('shopify json sync utilities', () => {
           localOnly: {title: 'local'}
         }
       }
+    })
+  })
+
+  test('syncTemplateJSON overwrites local templates with remote copies (no merge)', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'shopify-json-sync-'))
+    process.chdir(workspace)
+
+    await writeJson(join(workspace, 'templates/index.json'), {
+      sections: {localOnly: {type: 'local'}},
+      order: ['localOnly']
+    })
+    await writeJson(join(workspace, 'remote/templates/index.json'), {
+      sections: {remoteOnly: {type: 'remote'}},
+      order: ['remoteOnly']
+    })
+
+    await writeJson(join(workspace, 'templates/nested/page.json'), {
+      foo: 'local'
+    })
+    await writeJson(join(workspace, 'remote/templates/nested/page.json'), {
+      foo: 'remote',
+      bar: 'remote'
+    })
+
+    const filesToPush = await syncTemplateJSON()
+
+    expect(filesToPush.sort()).toEqual(
+      ['templates/index.json', 'templates/nested/page.json'].sort()
+    )
+
+    expect(
+      JSON.parse(await readFile(join(workspace, 'templates/index.json'), 'utf8'))
+    ).toEqual({
+      sections: {remoteOnly: {type: 'remote'}},
+      order: ['remoteOnly']
+    })
+
+    expect(
+      JSON.parse(
+        await readFile(join(workspace, 'templates/nested/page.json'), 'utf8')
+      )
+    ).toEqual({
+      foo: 'remote',
+      bar: 'remote'
     })
   })
 
