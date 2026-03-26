@@ -1,5 +1,5 @@
 import {create} from '@actions/glob'
-import {readFile, writeFile, mkdir} from 'fs/promises'
+import {copyFile, readFile, writeFile, mkdir} from 'fs/promises'
 import {existsSync} from 'fs'
 import deepmerge from 'deepmerge'
 import {rmRF} from '@actions/io'
@@ -198,6 +198,56 @@ export const removeDisabledKeys = (
   return newObj
 }
 
+const mergeOptions = {
+  arrayMerge: (_: unknown[], sourceArray: unknown[]) => sourceArray,
+  customMerge: (key: string) => {
+    if (key === 'blocks') {
+      return (_: unknown, newBlocks: ShopifySettingsOrTemplateJSON) =>
+        removeDisabledKeys(newBlocks)
+    }
+    return undefined
+  }
+}
+
+/**
+ * Deep-merge pulled files under `remote/` into matching repo paths.
+ * Remote wins on conflicting keys; keys that exist only in the repo are kept.
+ */
+export const mergeRemoteJsonPathsIntoLocal = async (
+  remotePatterns: string[]
+): Promise<string[]> => {
+  const remoteFiles = await fetchFiles(remotePatterns.join('\n'))
+
+  for (const path of remoteFiles) {
+    debug(`Remote File: ${path}`)
+  }
+  const localFilesToPush: string[] = []
+  for (const file of remoteFiles) {
+    try {
+      const remoteJson = await readJsonFile(file)
+      debug(`Remote File: ${file}`)
+
+      const localFileRef = await fetchLocalFileForRemoteFile(file)
+      debug(`Local File Ref: ${localFileRef}`)
+      const localJson = await readJsonFile(localFileRef)
+
+      const mergedFile = deepmerge(localJson, remoteJson, mergeOptions)
+
+      await mkdir(dirname(localFileRef), {recursive: true})
+      await writeFile(localFileRef, JSON.stringify(mergedFile, null, 2))
+      localFilesToPush.push(localFileRef)
+    } catch (error) {
+      if (error instanceof Error) {
+        debug('Error in mergeRemoteJsonPathsIntoLocal')
+        debug(error.message)
+      }
+      continue
+    }
+  }
+
+  return localFilesToPush
+}
+
 export const syncLocaleAndSettingsJSON = async ({
   includeSettingsData = true
 }: {
@@ -208,44 +258,28 @@ export const syncLocaleAndSettingsJSON = async ({
     remotePatterns.push('./remote/config/*_data.json')
   }
 
-  const remoteFiles = await fetchFiles(remotePatterns.join('\n'))
+  return mergeRemoteJsonPathsIntoLocal(remotePatterns)
+}
 
-  for (const remoteFile of remoteFiles) {
-    debug(`Remote File: ${remoteFile}`)
-  }
+/**
+ * Overwrite templates/ with copies of pulled remote/templates (no merge).
+ * Local-only templates (not present under remote after pull) are unchanged here;
+ * they are pushed separately via getNewTemplatesToRemote.
+ */
+export const syncTemplateJSON = async (): Promise<string[]> => {
+  const remoteFiles = await fetchFiles('./remote/templates/**/*.json')
   const localFilesToPush: string[] = []
+
   for (const file of remoteFiles) {
     try {
-      // Read JSON for Remote File
-      const remoteFile = await readJsonFile(file)
-      debug(`Remote File: ${file}`)
-
-      // Get Local Version of File Path
+      debug(`Remote template: ${file}`)
       const localFileRef = await fetchLocalFileForRemoteFile(file)
-      debug(`Local File Ref: ${localFileRef}`)
-      // Read JSON for Local File
-      const localFile = await readJsonFile(localFileRef)
-
-      // Merge Local and Remote Files with Remote as Primary
-      const mergedFile = deepmerge(localFile, remoteFile, {
-        arrayMerge: (_, sourceArray) => sourceArray,
-        customMerge: key => {
-          if (key === 'blocks') {
-            return (_, newBlocks) => {
-              return removeDisabledKeys(newBlocks)
-            }
-          }
-          return undefined
-        }
-      })
-
-      // Write Merged File to Local File
       await mkdir(dirname(localFileRef), {recursive: true})
-      await writeFile(localFileRef, JSON.stringify(mergedFile, null, 2))
+      await copyFile(file, localFileRef)
       localFilesToPush.push(localFileRef)
     } catch (error) {
       if (error instanceof Error) {
-        debug('Error in syncLocaleAndSettingsJSON')
+        debug('Error in syncTemplateJSON')
         debug(error.message)
       }
       continue
