@@ -1,6 +1,5 @@
 name: 'Shopify Theme JSON Syncs'
 description: 'Sync Shopify Theme JSONs'
-author: 'devil1991'
 inputs:
   store:
     required: true

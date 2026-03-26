@@ -320,12 +320,35 @@ const syncLocaleAndSettingsJSON = async ({ includeSettingsData = true } = {}) =>
 };
 exports.syncLocaleAndSettingsJSON = syncLocaleAndSettingsJSON;
 const getNewTemplatesToRemote = async () => {
-    const remoteTemplateFilesNames = ((await (0, exports.fetchFiles)('./remote/templates/**/*.json')) || []).map(file => file.replace(`${process.cwd()}/remote/`, 'remote/').replace('remote/', ''));
+    const remoteTemplateFiles = (await (0, exports.fetchFiles)('./remote/templates/**/*.json')) || [];
+    const localFilesToPush = [];
+    for (const file of remoteTemplateFiles) {
+        try {
+            const remoteFile = await (0, exports.readJsonFile)(file);
+            const localFileRef = await fetchLocalFileForRemoteFile(file);
+            const localFile = await (0, exports.readJsonFile)(localFileRef);
+            const mergedFile = (0, deepmerge_1.default)(localFile, remoteFile, {
+                arrayMerge: (_, sourceArray) => sourceArray
+            });
+            await (0, promises_1.mkdir)((0, path_1.dirname)(localFileRef), { recursive: true });
+            await (0, promises_1.writeFile)(localFileRef, JSON.stringify(mergedFile, null, 2));
+            localFilesToPush.push(localFileRef);
+        }
+        catch (error) {
+            if (error instanceof Error) {
+                (0, core_1.debug)('Error in getNewTemplatesToRemote');
+                (0, core_1.debug)(error.message);
+            }
+        }
+    }
     const localTemplateFiles = await (0, exports.fetchFiles)('./templates/**/*.json');
-    const localeFilesToMove = localTemplateFiles
-        .map(file => file.replace(`${process.cwd()}/`, ''))
-        .filter(file => !remoteTemplateFilesNames.includes(file));
-    return localeFilesToMove;
+    for (const file of localTemplateFiles) {
+        const localFileRef = file.replace(`${process.cwd()}/`, '');
+        if (!localFilesToPush.includes(localFileRef)) {
+            localFilesToPush.push(localFileRef);
+        }
+    }
+    return localFilesToPush;
 };
 exports.getNewTemplatesToRemote = getNewTemplatesToRemote;
 
